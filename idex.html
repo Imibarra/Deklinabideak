@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="eu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deklinabidea ikasten</title>
+    <!-- Carga de Tailwind CSS para estilos -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        // Configuración de Tailwind CSS
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'basque-blue': '#102A43',
+                        'basque-green': '#65D590',
+                        'error-red': '#E53E3E',
+                        'success-green': '#38A169',
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Estilos personalizados y animaciones */
+        .card {
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 4, 0, 0.05);
+            transition: all 0.3s ease-in-out;
+        }
+        .correct-animation {
+            animation: correctPulse 0.5s ease-out;
+        }
+        .incorrect-animation {
+            animation: incorrectShake 0.5s ease-out;
+        }
+        @keyframes correctPulse {
+            0% { transform: scale(1); background-color: rgba(56, 161, 105, 0.1); }
+            50% { transform: scale(1.01); background-color: rgba(56, 161, 105, 0.3); }
+            100% { transform: scale(1); background-color: transparent; }
+        }
+        @keyframes incorrectShake {
+            0%, 100% { transform: translateX(0); }
+            20%, 60% { transform: translateX(-5px); }
+            40%, 80% { transform: translateX(5px); }
+        }
+        /* Estilo para la pantalla de finalización */
+        .completion-screen {
+            background-image: linear-gradient(135deg, #102A43 0%, #0d4b29 100%);
+            color: white;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4 font-sans">
+
+    <!-- Contenedor Principal de la Aplicación -->
+    <div id="app" class="w-full max-w-lg bg-white rounded-xl card p-6 md:p-8">
+        
+        <!-- Contenedor del título (Selector eliminado) -->
+        <div id="title-container" class="relative mb-2">
+            <h1 class="text-3xl font-bold text-center text-basque-blue">Deklinabidea ikasten</h1>
+        </div>
+
+        <p class="text-center text-gray-600 mb-6">Osatu izena adierazitako kasuan eta zenbakian (singularra edo plurala).</p>
+
+        <!-- Sección de Puntuación -->
+        <div id="score-details" class="flex justify-between items-center bg-gray-50 p-3 rounded-lg mb-6 text-sm font-medium">
+            <span id="exercise-counter" class="text-basque-blue font-extrabold">1 / 50</span>
+            <span class="text-success-green">Ondo: <span id="score-correct">0</span></span>
+            <span class="text-error-red">Txarto: <span id="score-incorrect">0</span></span>
+            <span class="text-basque-blue">Guztira: <span id="score-total">0</span></span>
+        </div>
+
+        <!-- Pregunta de Ejercicio -->
+        <div id="exercise-card" class="p-6 bg-basque-blue text-white rounded-xl mb-6 flex flex-col justify-center items-center h-40">
+            <p id="current-word" class="text-5xl font-extrabold tracking-tight">...</p>
+            <p id="current-case" class="text-xl mt-2 font-light">...</p>
+        </div>
+
+        <!-- Formulario de Respuesta -->
+        <div class="space-y-4">
+            <input
+                type="text"
+                id="answer-input"
+                placeholder="Idatzi forma zuzena hemen..."
+                class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-basque-green text-lg"
+                onkeypress="if(event.key === 'Enter') checkAnswer()"
+            >
+
+            <button
+                id="check-button"
+                onclick="checkAnswer()"
+                class="w-full bg-basque-green hover:bg-basque-green/90 text-basque-blue font-bold py-3 rounded-lg transition duration-200 shadow-md"
+            >
+                Egiaztatu
+            </button>
+        </div>
+
+        <!-- Mensaje de Feedback -->
+        <div id="feedback-message" class="mt-6 text-center p-3 rounded-lg hidden font-semibold"></div>
+
+    </div>
+
+    <script>
+        const TOTAL_EXERCISES = 50;
+        
+        // Uso de 'var' para las variables de estado principales (soluciona ReferenceError)
+        var allExercises = [];
+        var currentExerciseIndex = 0;
+        var score = { correct: 0, incorrect: 0, total: 0 };
+
+        // Elementos del DOM
+        const appContainer = document.getElementById('app');
+        const wordDisplay = document.getElementById('current-word');
+        const caseDisplay = document.getElementById('current-case');
+        const inputField = document.getElementById('answer-input');
+        const feedbackMessage = document.getElementById('feedback-message');
+        const exerciseCard = document.getElementById('exercise-card');
+        const scoreCorrect = document.getElementById('score-correct');
+        const scoreIncorrect = document.getElementById('score-incorrect');
+        const scoreTotal = document.getElementById('score-total');
+        const exerciseCounter = document.getElementById('exercise-counter');
+        const checkButton = document.getElementById('check-button');
+        // const exerciseSelector = document.getElementById('exercise-selector'); // Eliminado del DOM y JS
+
+        // Elementos a ocultar al finalizar
+        const titleContainer = document.getElementById('title-container');
+        const instructionText = document.querySelector('.text-center.text-gray-600.mb-6');
+        const scoreDetails = document.getElementById('score-details');
+
+
+        // --- DEKLINABIDE-DATUAK SORTZEKO FUNTZIO LAGUNTZAILEAK (49 IZENENTZAT) ---
+
+        /**
+         * Funtzio laguntzailea deklinabide-datuak sortzeko, izen-mota eta kategoria (pertsona/objektu) kontuan hartuta.
+         */
+        const createNounDeclension = (root, type, category) => {
+            let singular = {};
+            let plural = {};
+
+            // 1. Kasu Komunak (NOR/NORK/NORI/NOREN/NORENTZAT/NOREKIN)
+
+            // Sustantivos terminados en Consonante: beharrezkoa da lotura-bokala.
+            if (type === 'consonant') {
+                const s_stem = root + 'a'; // Ej: gizon -> gizona
+                const p_stem = root;       // Ej: gizon -> gizonak
+
+                singular = { 
+                    "NOR/ZER": s_stem, "NORK": s_stem + 'k', "NORI": s_stem + 'ri', "NOREN": s_stem + 'ren', 
+                    "NORENTZAT": s_stem + 'rentzat', "NOREKIN": s_stem + 'rekin', "ZERTAZ": s_stem + 'z'
+                };
+                plural = {
+                    "NOR/ZER": p_stem + 'ak', "NORK": p_stem + 'ek', "NORI": p_stem + 'ei', "NOREN": p_stem + 'en', 
+                    "NORENTZAT": p_stem + 'entzat', "NOREKIN": p_stem + 'ekin', "ZERTAZ": p_stem + 'ez'
+                };
+
+            } 
+            // Sustantivos terminados en Vocal (Tipo 'etxe' o 'ikastola')
+            else {
+                // p_stem (full root) se usa para NOR/ZER plural
+                const p_stem = root; 
+                
+                // plural_stem se usa para el resto de plurales que empiezan por 'e' (NORK, NORI...)
+                let plural_stem = root; 
+                // CORRECCIÓN: Si la raíz termina en 'a' (ikastola), se elimina la 'a' para formar el plural definido (ikastolek).
+                if (root.endsWith('a') && root.length > 1) {
+                    plural_stem = root.substring(0, root.length - 1); // ikastola -> ikastol
+                }
+
+                // Singular forms
+                singular = { 
+                    "NOR/ZER": root + 'a', "NORK": root + 'ak', "NORI": root + 'ari', "NOREN": root + 'aren', 
+                    "NORENTZAT": root + 'arentzat', "NOREKIN": root + 'arekin', "ZERTAZ": root + 'z'
+                };
+
+                // Plural forms (utilizando plural_stem corregido para 'a' finales)
+                plural = {
+                    "NOR/ZER": p_stem + 'ak', // ikastolak, etxeak
+                    "NORK": plural_stem + 'ek', // ikastolek, etxeek
+                    "NORI": plural_stem + 'ei', // ikastolei, etxeei
+                    "NOREN": plural_stem + 'en', // ikastolen, etxeen
+                    "NORENTZAT": plural_stem + 'entzat', // ikastolentzat, etxeentzat
+                    "NOREKIN": plural_stem + 'ekin', // ikastolekin, etxeekin
+                    "ZERTAZ": plural_stem + 'ez' // ikastolez, etxeez
+                };
+            }
+
+            // 2. Kasu Lokalak (Animatuak vs Inanimatuak)
+            if (category === 'object') {
+                // Objeto Inanimado (lekuak eta animaliak barne) -> NON, NORA, NONDIK, NONGO
+                if (type === 'vowel') {
+                    const plural_stem_local = root.endsWith('a') && root.length > 1 ? root.substring(0, root.length - 1) : root;
+                    
+                    singular = { ...singular, "NON": root + 'an', "NORA": root + 'ra', "NONDIK": root + 'tik', "NONGO": root + 'ko' };
+                    
+                    // Plural local forms use 'et-' endings, requiring the shortened stem if applicable
+                    plural = { 
+                        ...plural, 
+                        "NON": plural_stem_local + 'etan', 
+                        "NORA": plural_stem_local + 'etara', 
+                        "NONDIK": plural_stem_local + 'etatik', 
+                        "NONGO": plural_stem_local + 'etako' 
+                    };
+
+                } else {
+                    // Kontsonante: 'e' gehitzen da singularrean
+                    const e_stem = root + 'e';
+                    const p_stem = root; 
+                    singular = { 
+                        ...singular, "NON": e_stem + 'an', "NORA": e_stem + 'ra', "NONDIK": e_stem + 'tik', "NONGO": e_stem + 'ko' 
+                    };
+                    plural = { 
+                        ...plural, "NON": p_stem + 'etan', "NORA": p_stem + 'etara', "NONDIK": p_stem + 'etatik', "NONGO": p_stem + 'etako' 
+                    };
+                }
+            } else {
+                // Pertsona Animada -> NORENGAN, NORENGANA, NORENGANDIK
+                if (type === 'vowel') {
+                    // Singular: root + arengan (e.g., emakumearengan)
+                    singular = { 
+                        ...singular, "NORENGAN": root + 'arengan', "NORENGANA": root + 'arengana', "NORENGANDIK": root + 'arengandik' 
+                    };
+                    // Plural: root + engan (e.g., emakumeengan)
+                    const p_stem = root;
+                    plural = { 
+                        ...plural, "NORENGAN": p_stem + 'engan', "NORENGANA": p_stem + 'engana', "NORENGANDIK": p_stem + 'engandik' 
+                    };
+                } else {
+                    // Kontsonante: singularrean 'a' gehitzen da
+                    const s_stem = root + 'a';
+                    const p_stem = root;
+
+                    singular = { 
+                        ...singular, "NORENGAN": s_stem + 'rengan', "NORENGANA": s_stem + 'rengana', "NORENGANDIK": s_stem + 'rengandik' 
+                    };
+                    plural = { 
+                        ...plural, "NORENGAN": p_stem + 'engan', "NORENGANA": p_stem + 'engana', "NORENGANDIK": p_stem + 'engandik' 
+                    };
+                }
+            }
+
+            return {
+                root: root,
+                type: `${type}-${category}`,
+                cases: { singular, plural }
+            };
+        };
+
+        // Datu-egitura eguneratua: 49 izen + 3 berri daude.
+        const declensionData = [
+            // Izenak (Vocal, Objeto) - 34 Izen (pilota barne)
+            createNounDeclension("etxe", "vowel", "object"), createNounDeclension("liburu", "vowel", "object"),
+            createNounDeclension("mahai", "vowel", "object"), // Index 2
+            createNounDeclension("mendi", "vowel", "object"),
+            createNounDeclension("itsaso", "vowel", "object"), 
+            createNounDeclension("eguzki", "vowel", "object"), 
+            createNounDeclension("ilargi", "vowel", "object"), createNounDeclension("hiri", "vowel", "object"),
+            createNounDeclension("baso", "vowel", "object"), 
+            createNounDeclension("lagun", "consonant", "person"), // Index 9
+            
+            createNounDeclension("pilota", "vowel", "object"), // INDEX 10
+            
+            createNounDeclension("ikastola", "vowel", "object"), // Index 11
+            createNounDeclension("lore", "vowel", "object"), 
+            createNounDeclension("herrialde", "vowel", "object"), 
+            createNounDeclension("makina", "vowel", "object"), // Index 14
+            createNounDeclension("etxola", "vowel", "object"), // Index 15
+            
+            createNounDeclension("katu", "vowel", "object"), // Animalia (Index 16) <-- Erabiliko da 38. ariketan
+            createNounDeclension("herri", "vowel", "object"), // Index 17 
+            createNounDeclension("eskola", "vowel", "object"), // Index 18
+            createNounDeclension("leiho", "vowel", "object"), createNounDeclension("ate", "vowel", "object"),
+            createNounDeclension("argi", "vowel", "object"), createNounDeclension("diru", "vowel", "object"), // Masa izen
+            createNounDeclension("kale", "vowel", "object"), createNounDeclension("plaka", "vowel", "object"),
+            createNounDeclension("ohe", "vowel", "object"), 
+            createNounDeclension("aulki", "vowel", "object"), // Index 26 
+            createNounDeclension("kai", "vowel", "object"), // Index 27
+            createNounDeclension("burdina", "vowel", "object"), // Index 28 
+            createNounDeclension("ogitarteko", "vowel", "object"), 
+            createNounDeclension("aulki", "vowel", "object"), // Index 30 
+            createNounDeclension("txori", "vowel", "object"), // Animalia
+            createNounDeclension("haragi", "vowel", "object"), createNounDeclension("zeru", "vowel", "object"),
+            
+            // Izenak (Kontsonante, Objeto) - 12 Izen
+            createNounDeclension("zuhaitz", "consonant", "object"), createNounDeclension("tren", "consonant", "object"),
+            createNounDeclension("sagar", "consonant", "object"), createNounDeclension("txakur", "consonant", "object"), // Animalia
+            createNounDeclension("lan", "consonant", "object"), createNounDeclension("izen", "consonant", "object"),
+            createNounDeclension("zur", "consonant", "object"), createNounDeclension("arrain", "consonant", "object"), // Animalia
+            createNounDeclension("bihotz", "consonant", "object"), createNounDeclension("belar", "consonant", "object"),
+            createNounDeclension("hitz", "consonant", "object"), createNounDeclension("ur", "consonant", "object"), // Masa izen
+
+            // Izenak (Pertsona) - 3 Izen + ardo + ogi (Index 46-49)
+            createNounDeclension("gizon", "consonant", "person"), // Index 46
+            createNounDeclension("emakume", "vowel", "person"),
+            createNounDeclension("haur", "consonant", "person"), 
+            createNounDeclension("ardo", "vowel", "object"), // Index 49
+            
+            // Izen berriak
+            createNounDeclension("madari", "vowel", "object"), // Index 50 <-- 37. ariketa
+            createNounDeclension("patio", "vowel", "object"),  // Index 51 <-- 44. ariketa
+            createNounDeclension("maisu", "vowel", "person"),  // Index 52 <-- 49. ariketa
+        ]; 
+        
+        // Lista fija de combinaciones Caso/Número para asegurar el orden mezclado y fijo.
+        const fixedCaseCombos = [
+            // 1. Zikloa (10 kasu ohikoenak singularrean eta pluralean txandaka)
+            { case: 'NOR/ZER', number: 'singular' }, // 0
+            { case: 'NORK', number: 'plural' },    // 1
+            { case: 'NORI', number: 'singular' }, // 2
+            { case: 'NON', number: 'plural' },    // 3
+            { case: 'NORA', number: 'singular' }, // 4
+            { case: 'NONDIK', number: 'singular' }, // 5
+            { case: 'NOREN', number: 'singular' }, // 6
+            { case: 'NORENTZAT', number: 'plural' }, // 7
+            { case: 'NOREKIN', number: 'singular' }, // 8
+            { case: 'NON', number: 'singular' }, // 9
+            
+            // 2. Zikloa (10 kasu ohikoenak alderantziz)
+            { case: 'NOR/ZER', number: 'plural' }, // 10
+            { case: 'NORK', number: 'plural' },    // 11
+            { case: 'NORI', number: 'plural' }, // 12
+            { case: 'NON', number: 'singular' }, // 13
+            { case: 'NORA', number: 'singular' },  // 14
+            { case: 'NONDIK', number: 'plural' },  // 15
+            { case: 'NOREN', number: 'plural' }, // 16
+            { case: 'NORENTZAT', number: 'singular' }, // 17
+            { case: 'NOREKIN', number: 'plural' }, // 18 
+            { case: 'NONGO', number: 'plural' }, // 19
+        ];
+
+
+        /**
+         * Genera un array de 50 ejercicios en un orden fijo y predecible.
+         */
+        function generateAllExercises() {
+            allExercises = [];
+            
+            const numNouns = declensionData.length; 
+            const numCombos = fixedCaseCombos.length; 
+
+            for (let i = 0; i < TOTAL_EXERCISES; i++) {
+                let nounIndex = i % numNouns; 
+                let comboIndex = i % numCombos; 
+                let combo = fixedCaseCombos[comboIndex];
+
+                // --- KORREKZIO PERTSONALIZATUAK HASIERA ---
+                
+                // Ariketa 18 (Indizea 17): mahai, NOREKIN plurala = mahaiekin
+                if (i === 17) {
+                    nounIndex = 2; // mahai
+                    comboIndex = 18; // NOREKIN plurala
+                    combo = fixedCaseCombos[comboIndex];
+                }
+
+                // Ariketa 29 (Indizea 28): aulki, NOREKIN singularra = aulki arekin
+                if (i === 28) {
+                    nounIndex = 26; // aulki
+                    comboIndex = 8; // NOREKIN singularra
+                    combo = fixedCaseCombos[comboIndex];
+                }
+                
+                // Ariketa 37 (Indizea 36): madari, NOREN singularra = madariaren
+                if (i === 36) {
+                    nounIndex = 50; // madari
+                    comboIndex = 6; // NOREN singularra
+                    combo = fixedCaseCombos[comboIndex];
+                }
+
+                // Ariketa 38 (Indizea 37): katu, NORENTZAT singularra = katuarentzat
+                if (i === 37) {
+                    nounIndex = 16; // katu
+                    comboIndex = 17; // NORENTZAT singularra
+                    combo = fixedCaseCombos[comboIndex];
+                }
+
+                // Ariketa 44 (Indizea 43): patio, NON plurala = patioetan
+                if (i === 43) {
+                    nounIndex = 51; // patio
+                    comboIndex = 3; // NON plurala
+                    combo = fixedCaseCombos[comboIndex];
+                }
+
+                // Ariketa 49 (Indizea 48): maisu, NOREKIN singularra = maisuarekin
+                if (i === 48) {
+                    nounIndex = 52; // maisu
+                    comboIndex = 8; // NOREKIN singularra
+                    combo = fixedCaseCombos[comboIndex];
+                }
+
+                // --- KORREKZIO PERTSONALIZATUEN AMAIERA ---
+
+
+                let selectedNounData = declensionData[nounIndex];
+                let selectedCaseName = combo.case;
+                let selectedNumber = combo.number;
+
+                // 3. Kasu Lokalen egokitzapena 'Pertsonentzat'
+                if (selectedNounData.type.includes('person')) {
+                    if (selectedCaseName === 'NON') selectedCaseName = 'NORENGAN';
+                    else if (selectedCaseName === 'NORA') selectedCaseName = 'NORENGANA';
+                    else if (selectedCaseName === 'NONDIK') selectedCaseName = 'NORENGANDIK';
+                    else if (selectedCaseName === 'NONGO') { 
+                        selectedCaseName = 'NOREN'; // Usar NOREN para personas cuando toca NONGO
+                    }
+                }
+
+                // 4. Erantzun zuzena lortu.
+                let correctAnswer = selectedNounData.cases[selectedNumber][selectedCaseName];
+                
+                // Fallback 
+                if (!correctAnswer) {
+                     correctAnswer = selectedNounData.cases['singular']['NOR/ZER'];
+                     selectedCaseName = 'NOR/ZER';
+                     selectedNumber = 'singular';
+                }
+
+                allExercises.push({
+                    noun: selectedNounData.root,
+                    caseName: selectedCaseName,
+                    number: selectedNumber,
+                    correctAnswer: correctAnswer.toLowerCase(),
+                    isCorrect: false, // Estado: se ha respondido correctamente
+                    attempted: false // Estado: se ha intentado responder alguna vez
+                });
+            }
+        }
+
+        /**
+         * Rellena el selector con las 50 opciones de ejercicio. (Función inactiva pero necesaria en caso de revertir)
+         */
+        function populateSelector() {
+            // No hacemos nada ya que el selector ha sido eliminado
+        }
+
+        /**
+         * Mueve la aplicación a un ejercicio específico. (Función inactiva pero necesaria en caso de revertir)
+         */
+        function goToExercise(index) {
+            currentExerciseIndex = parseInt(index, 10);
+            displayCurrentExercise();
+        }
+
+        /**
+         * Muestra el ejercicio actual basado en currentExerciseIndex.
+         */
+        function displayCurrentExercise() {
+            // Se usa currentExerciseIndex sin problemas gracias al cambio a 'var'
+            if (currentExerciseIndex >= TOTAL_EXERCISES) {
+                showCompletionMessage();
+                return;
+            }
+
+            const exercise = allExercises[currentExerciseIndex];
+            // Traducir 'singular'/'plural' a 'singularra'/'plurala' para la UI
+            const numberDisplay = exercise.number === 'singular' ? 'singularra' : 'plurala';
+            
+            // Actualizar la interfaz de usuario
+            wordDisplay.textContent = exercise.noun.toUpperCase();
+            caseDisplay.textContent = `${exercise.caseName} ${numberDisplay}`; 
+            exerciseCounter.textContent = `${currentExerciseIndex + 1} / ${TOTAL_EXERCISES}`;
+
+            // Resetear la pantalla de finalización si hemos vuelto
+            appContainer.classList.remove('completion-screen', 'text-white');
+            exerciseCard.classList.remove('hidden');
+
+
+            // Mostrar el estado y la respuesta si ya se ha respondido correctamente
+            if (exercise.isCorrect) {
+                inputField.value = exercise.correctAnswer;
+                displayFeedback(true, `Ariketa hau zuzen erantzun duzu. ✅`);
+            } else {
+                inputField.value = ''; // Borrar el input para intentar de nuevo
+                feedbackMessage.classList.add('hidden'); 
+            }
+
+            // Asegurar que el focus esté en el input
+            inputField.focus();
+        }
+
+        /**
+         * Recalcula la puntuación total a partir del estado de todos los ejercicios.
+         */
+        function recalculateScore() {
+            score.correct = allExercises.filter(ex => ex.isCorrect).length;
+            score.incorrect = allExercises.filter(ex => ex.attempted && !ex.isCorrect).length;
+            score.total = allExercises.filter(ex => ex.attempted).length;
+            updateScoreDisplay();
+        }
+        
+        /**
+         * Muestra un mensaje de finalización.
+         */
+        function showCompletionMessage() {
+            recalculateScore();
+            
+            // Ocultar elementos de la interfaz de ejercicio
+            wordDisplay.textContent = "AMAITUTA!";
+            caseDisplay.textContent = ""; // Limpiar el caso
+            
+            // Ocultar los elementos de la interfaz de práctica
+            titleContainer.classList.add('hidden'); // Ocultar título
+            instructionText.classList.add('hidden'); // Ocultar instrucción
+            scoreDetails.classList.add('hidden'); // Ocultar puntuación
+            
+            inputField.style.display = 'none';
+            checkButton.style.display = 'none';
+            feedbackMessage.classList.add('hidden');
+
+            // Preparar la tarjeta de ejercicio como pantalla de felicitación
+            exerciseCard.classList.add('completion-screen', 'flex-col', 'justify-center', 'items-center', 'text-center', 'h-80');
+            exerciseCard.classList.remove('bg-basque-blue');
+            exerciseCard.innerHTML = `
+                <div class="text-6xl mb-4">🏆</div>
+                <p class="text-4xl font-extrabold mb-2">Zorionak!</p>
+                <p class="text-xl font-light mb-4">Ariketa guztiak amaitu dituzu.</p>
+                <p class="text-2xl font-bold">Erantzun zuzenak: ${score.correct} / ${TOTAL_EXERCISES}</p>
+                <button onclick="window.location.reload()" class="mt-8 px-6 py-2 bg-basque-green text-basque-blue font-bold rounded-lg shadow-md hover:bg-basque-green/80 transition duration-200">
+                    Berriro hasi
+                </button>
+            `;
+        }
+
+        /**
+         * Comprueba la respuesta del usuario con la respuesta correcta.
+         */
+        function checkAnswer() {
+            if (currentExerciseIndex >= TOTAL_EXERCISES) return;
+
+            const currentExercise = allExercises[currentExerciseIndex];
+            const userAnswer = inputField.value.trim().toLowerCase();
+            const correctAnswer = currentExercise.correctAnswer;
+            
+            // Marcar como intentado la primera vez
+            if (!currentExercise.attempted) {
+                currentExercise.attempted = true;
+            }
+
+            // Lógica de comprobación
+            if (userAnswer === correctAnswer) {
+                // Respuesta correcta
+                currentExercise.isCorrect = true;
+                recalculateScore(); 
+                
+                displayFeedback(true, `Zuzen! ✅`);
+                exerciseCard.classList.remove('incorrect-animation');
+                exerciseCard.classList.add('correct-animation');
+                
+                
+                // Esperar un momento antes de generar el siguiente ejercicio
+                setTimeout(() => {
+                    exerciseCard.classList.remove('correct-animation');
+                    
+                    // Avanzar al siguiente ejercicio (si no es el último)
+                    if (currentExerciseIndex < TOTAL_EXERCISES - 1) {
+                        currentExerciseIndex++;
+                        displayCurrentExercise();
+                    } else {
+                        // AMAIERA
+                        showCompletionMessage();
+                    }
+                }, 1000);
+
+            } else {
+                // Respuesta incorrecta
+                currentExercise.isCorrect = false;
+                recalculateScore(); 
+
+                displayFeedback(false, `Akatsa! ❌ Forma zuzena hau zen: ${correctAnswer}`);
+                exerciseCard.classList.remove('correct-animation');
+                exerciseCard.classList.add('incorrect-animation');
+                inputField.focus(); 
+
+                // Quitar la animación después de que termine
+                setTimeout(() => {
+                    exerciseCard.classList.remove('incorrect-animation');
+                }, 500);
+            }
+        }
+
+        /**
+         * Muestra el mensaje de feedback (correcto/incorrecto).
+         */
+        function displayFeedback(isCorrect, message) {
+            feedbackMessage.textContent = message;
+            feedbackMessage.classList.remove('hidden', 'bg-error-red/10', 'text-error-red', 'bg-success-green/10', 'text-success-green');
+            
+            if (isCorrect) {
+                feedbackMessage.classList.add('bg-success-green/10', 'text-success-green');
+            } else {
+                feedbackMessage.classList.add('bg-error-red/10', 'text-error-red');
+            }
+        }
+
+        /**
+         * Actualiza los contadores de puntuación en la UI.
+         */
+        function updateScoreDisplay() {
+            scoreCorrect.textContent = score.correct;
+            scoreIncorrect.textContent = score.incorrect;
+            scoreTotal.textContent = score.total;
+        }
+
+        // Inicializar la aplicación al cargar
+        window.onload = () => {
+            generateAllExercises();
+            // populateSelector(); // Eliminado
+            displayCurrentExercise();
+        };
+
+    </script>
+</body>
+</html>
